@@ -214,6 +214,12 @@ async function getClanData(clanTag: string) {
     clashFetch(`/clans/${encoded}/capitalraidseasons?limit=5`, []),
   ]);
 
+  // Cloud collector: normal clan-data refreshes capture current and recent wars.
+  await Promise.all([
+    persistWarSnapshot(currentWar, clanTag),
+    persistWarHistory(warlog, clanTag),
+  ]);
+
   return { clan, clanTag, currentWar, warlog, capital };
 }
 
@@ -333,36 +339,45 @@ async function handleCoach(req: Request, res: Response, requireAuth = false) {
   }
 }
 
-async function persistWarHistory(warlog: any, clanTag: string) {
-  if (!process.env.DATABASE_URL) return;
+async function persistWarSnapshot(war: any, clanTag: string) {
+  if (!process.env.DATABASE_URL || !war) return;
 
   try {
     const { db, warHistoryTable, warPlayerAttacksTable } = await import("@workspace/db");
-    const items = Array.isArray(warlog) ? warlog : Array.isArray(warlog?.items) ? warlog.items : [];
     const ourTag = normalizeTag(clanTag);
+    const clan = war?.clan || {};
+    const opponent = war?.opponent || {};
+    const ours = normalizeTag(String(clan.tag || "")) === ourTag ? clan : opponent;
+    const enemy = ours === clan ? opponent : clan;
+    const warTime = String(war?.endTime || war?.startTime || "");
+    if (!warTime || !ours?.tag) return;
 
-    for (const war of items.slice(0, 50)) {
-      const clan = war?.clan || {};
-      const opponent = war?.opponent || {};
-      const ours = normalizeTag(String(clan.tag || "")) === ourTag ? clan : opponent;
-      const enemy = ours === clan ? opponent : clan;
-      const warTime = String(war?.endTime || war?.startTime || "");
-      if (!warTime) continue;
+    const warKey = `${ourTag}:${warTime}:${String(enemy?.tag || enemy?.name || "opponent")}`;
+    const teamSize = number(war?.teamSize, Math.max(
+      Array.isArray(ours?.members) ? ours.members.length : 0,
+      Array.isArray(enemy?.members) ? enemy.members.length : 0,
+    ));
 
-      const warKey = `${ourTag}:${warTime}:${String(enemy?.tag || enemy?.name || "opponent")}`;
-      const teamSize = number(war?.teamSize, Math.max(
-        Array.isArray(ours?.members) ? ours.members.length : 0,
-        Array.isArray(enemy?.members) ? enemy.members.length : 0,
-      ));
-
-      await db.insert(warHistoryTable).values({
-        warKey,
-        clanTag: ourTag,
-        endTime: warTime,
+    await db.insert(warHistoryTable).values({
+      warKey,
+      clanTag: ourTag,
+      endTime: warTime,
+      state: String(war?.state || ""),
+      result: String(war?.result || ""),
+      clanName: String(ours?.name || ""),
+      opponentName: String(enemy?.name || ""),
+      clanStars: number(ours?.stars),
+      opponentStars: number(enemy?.stars),
+      clanDestruction: Math.round(number(ours?.destructionPercentage)),
+      opponentDestruction: Math.round(number(enemy?.destructionPercentage)),
+      teamSize,
+      attacksPerMember: number(war?.attacksPerMember, 2),
+      rawWar: war,
+    }).onConflictDoUpdate({
+      target: warHistoryTable.warKey,
+      set: {
         state: String(war?.state || ""),
         result: String(war?.result || ""),
-        clanName: String(ours?.name || ""),
-        opponentName: String(enemy?.name || ""),
         clanStars: number(ours?.stars),
         opponentStars: number(enemy?.stars),
         clanDestruction: Math.round(number(ours?.destructionPercentage)),
@@ -370,65 +385,58 @@ async function persistWarHistory(warlog: any, clanTag: string) {
         teamSize,
         attacksPerMember: number(war?.attacksPerMember, 2),
         rawWar: war,
-      }).onConflictDoUpdate({
-        target: warHistoryTable.warKey,
-        set: {
-          state: String(war?.state || ""),
-          result: String(war?.result || ""),
-          clanStars: number(ours?.stars),
-          opponentStars: number(enemy?.stars),
-          clanDestruction: Math.round(number(ours?.destructionPercentage)),
-          opponentDestruction: Math.round(number(enemy?.destructionPercentage)),
-          teamSize,
-          attacksPerMember: number(war?.attacksPerMember, 2),
-          rawWar: war,
-        },
-      });
+      },
+    });
 
-      const members = Array.isArray(ours?.members) ? ours.members : [];
-      if (!members.length) continue;
+    const members = Array.isArray(ours?.members) ? ours.members : [];
+    const attackRows = members.flatMap((member: Dict) => {
+      const memberTag = normalizeTag(String(member?.tag || ""));
+      const attacks = Array.isArray(member?.attacks) ? member.attacks : [];
+      if (!memberTag) return [];
 
-      const attackRows = members.flatMap((member: Dict) => {
-        const memberTag = normalizeTag(String(member?.tag || ""));
-        const attacks = Array.isArray(member?.attacks) ? member.attacks : [];
-        if (!memberTag) return [];
+      return attacks.map((attack: Dict, i: number) => ({
+        warKey,
+        playerTag: memberTag,
+        playerName: String(member?.name || ""),
+        townHallLevel: number(member?.townhallLevel ?? member?.townHallLevel),
+        attackIndex: i + 1,
+        stars: number(attack?.stars),
+        destruction: Math.round(number(attack?.destructionPercentage)),
+        targetMapPosition: number(attack?.defender?.mapPosition ?? attack?.defenderMapPosition),
+        defenderTag: String(attack?.defender?.tag || ""),
+        defenderName: String(attack?.defender?.name || ""),
+        attackTime: String(attack?.endTime || attack?.startTime || ""),
+      }));
+    });
 
-        return attacks.map((attack: Dict, i: number) => ({
-          warKey,
-          playerTag: memberTag,
-          playerName: String(member?.name || ""),
-          townHallLevel: number(member?.townhallLevel ?? member?.townHallLevel),
-          attackIndex: i + 1,
-          stars: number(attack?.stars),
-          destruction: Math.round(number(attack?.destructionPercentage)),
-          targetMapPosition: number(attack?.defender?.mapPosition ?? attack?.defenderMapPosition),
-          defenderTag: String(attack?.defender?.tag || ""),
-          defenderName: String(attack?.defender?.name || ""),
-          attackTime: String(attack?.endTime || attack?.startTime || ""),
-        }));
-      });
-
-      if (attackRows.length) {
-        await db.insert(warPlayerAttacksTable)
-          .values(attackRows)
-          .onConflictDoNothing();
-      }
+    if (attackRows.length) {
+      await db.insert(warPlayerAttacksTable)
+        .values(attackRows)
+        .onConflictDoNothing();
     }
   } catch (error) {
-    console.warn("War history persistence skipped:", String((error as any)?.message || error));
+    console.warn("War snapshot persistence skipped:", String((error as any)?.message || error));
   }
 }
 
+async function persistWarHistory(warlog: any, clanTag: string) {
+  const items = Array.isArray(warlog) ? warlog : Array.isArray(warlog?.items) ? warlog.items : [];
+  for (const war of items.slice(0, 50)) {
+    await persistWarSnapshot(war, clanTag);
+  }
+}
 async function getPlayerCoachData(playerTag: string) {
   const tag = normalizeTag(playerTag);
   const encoded = encodeURIComponent(tag);
 
-  const [player, warlog] = await Promise.all([
-    clashFetch(`/players/${encoded}`),
-    clashFetch(`/clans/${encodeURIComponent(DEFAULT_CLAN_TAG)}/warlog`, []),
-  ]);
+  const player = await clashFetch(`/players/${encoded}`);
+  const playerClanTag = typeof player?.clan?.tag === "string" && player.clan.tag.trim()
+    ? normalizeTag(player.clan.tag)
+    : DEFAULT_CLAN_TAG;
+  const warlog = await clashFetch(`/clans/${encodeURIComponent(playerClanTag)}/warlog`, []);
 
-  await persistWarHistory(warlog, DEFAULT_CLAN_TAG);
+  // Player Coach also contributes to the collector using the player's actual clan.
+  await persistWarHistory(warlog, playerClanTag);
 
   let history: Dict[] = [];
   if (process.env.DATABASE_URL) {
