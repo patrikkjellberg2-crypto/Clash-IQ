@@ -170,6 +170,34 @@ function normalizeWarLog(
   }));
 }
 
+function extractMemberList(value: ClashRecord | ClashRecord[] | null): ClashRecord[] {
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is ClashRecord => Boolean(item && typeof item === "object"),
+    );
+  }
+
+  if (!value || typeof value !== "object") return [];
+
+  const candidates = [
+    value.items,
+    value.members,
+    value.memberList,
+    (value.data && typeof value.data === "object" ? (value.data as ClashRecord).items : null),
+    (value.data && typeof value.data === "object" ? (value.data as ClashRecord).members : null),
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(
+        (item): item is ClashRecord => Boolean(item && typeof item === "object"),
+      );
+    }
+  }
+
+  return [];
+}
+
 function listItems(
   value: ClashRecord | ClashRecord[] | null,
 ): ClashRecord[] {
