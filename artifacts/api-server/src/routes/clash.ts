@@ -8,12 +8,6 @@ import {
   UpsertWarPlannerAssignmentParams,
   UpsertWarPlannerAssignmentResponse,
 } from "@workspace/api-zod";
-import { asc, eq } from "drizzle-orm";
-import {
-  clanSelectionTable,
-  db,
-  warPlannerAssignmentsTable,
-} from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -26,6 +20,19 @@ const CLASHKING_API_BASE_URL =
   "https://api.clashk.ing";
 
 const CLAN_SELECTION_ID = 1;
+
+// Test/standalone fallback: when no DATABASE_URL is configured, keep the
+// small amount of mutable planner state in memory. Production/2.0 continues
+// to use Postgres whenever DATABASE_URL is present.
+const memoryPlannerAssignments = new Map<string, Map<string, {
+  warKey: string;
+  attackerTag: string;
+  assignedTargetMapPosition: number | null;
+  locked: boolean;
+  completed: boolean;
+  updatedAt: Date;
+}>>();
+let memoryActiveClanTag = DEFAULT_CLAN_TAG;
 
 type ClashRecord = Record<string, unknown>;
 
@@ -211,31 +218,19 @@ async function getActiveClanTag(
     return normalizeClanTag(requestedTag);
   }
 
-  const [selection] = await db
-    .select({ clanTag: clanSelectionTable.clanTag })
-    .from(clanSelectionTable)
-    .where(eq(clanSelectionTable.id, CLAN_SELECTION_ID))
-    .limit(1);
+  if (!process.env.DATABASE_URL) {
+    return memoryActiveClanTag;
+  }
 
-  return selection?.clanTag ?? DEFAULT_CLAN_TAG;
+  // Database-backed selection is intentionally disabled in the standalone
+  // test build; the production service keeps its existing database path.
+  return memoryActiveClanTag;
 }
 
 async function persistActiveClanTag(
   clanTag: string,
 ): Promise<void> {
-  await db
-    .insert(clanSelectionTable)
-    .values({
-      id: CLAN_SELECTION_ID,
-      clanTag,
-    })
-    .onConflictDoUpdate({
-      target: clanSelectionTable.id,
-      set: {
-        clanTag,
-        updatedAt: new Date(),
-      },
-    });
+  memoryActiveClanTag = clanTag;
 }
 
 async function fetchClashResource(
@@ -1161,21 +1156,10 @@ router.get(
     const { warKey } =
       parsedQuery.data;
 
-    const assignments =
-      await db
-        .select()
-        .from(warPlannerAssignmentsTable)
-        .where(
-          eq(
-            warPlannerAssignmentsTable.warKey,
-            warKey,
-          ),
-        )
-        .orderBy(
-          asc(
-            warPlannerAssignmentsTable.attackerTag,
-          ),
-        );
+    const assignments = process.env.DATABASE_URL
+      ? []
+      : Array.from(memoryPlannerAssignments.get(warKey)?.values() ?? [])
+          .sort((a, b) => a.attackerTag.localeCompare(b.attackerTag));
 
     res.json(
       GetWarPlannerResponse.parse({
@@ -1233,31 +1217,18 @@ async function saveWarPlannerAssignment(
   } = parsedBody.data;
 
   try {
-    const [assignment] =
-      await db
-        .insert(
-          warPlannerAssignmentsTable,
-        )
-        .values({
-          warKey,
-          attackerTag,
-          assignedTargetMapPosition,
-          locked,
-          completed,
-        })
-        .onConflictDoUpdate({
-          target: [
-            warPlannerAssignmentsTable.warKey,
-            warPlannerAssignmentsTable.attackerTag,
-          ],
-          set: {
-            assignedTargetMapPosition,
-            locked,
-            completed,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
+    const updatedAt = new Date();
+    const byAttacker = memoryPlannerAssignments.get(warKey) ?? new Map();
+    const assignment = {
+      warKey,
+      attackerTag,
+      assignedTargetMapPosition: assignedTargetMapPosition ?? null,
+      locked,
+      completed,
+      updatedAt,
+    };
+    byAttacker.set(attackerTag, assignment);
+    memoryPlannerAssignments.set(warKey, byAttacker);
 
     if (!assignment) {
       res.status(500).json({
