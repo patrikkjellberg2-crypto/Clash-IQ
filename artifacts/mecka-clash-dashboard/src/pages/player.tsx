@@ -152,6 +152,29 @@ export default function PlayerPage() {
   const [player, setPlayer] = useState<Dict | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [playerCoachLoading, setPlayerCoachLoading] = useState(false);
+  const [playerCoachAnswer, setPlayerCoachAnswer] = useState('');
+  const [playerCoachError, setPlayerCoachError] = useState('');
+
+  async function runPlayerCoach() {
+    if (!tag) return;
+    setPlayerCoachLoading(true);
+    setPlayerCoachError('');
+    try {
+      const response = await fetch('/api/ai/player', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerTag: tag }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      setPlayerCoachAnswer(String(body.answer || 'No analysis returned.'));
+    } catch (err) {
+      setPlayerCoachError(err instanceof Error ? err.message : 'Player Coach failed.');
+    } finally {
+      setPlayerCoachLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1087,13 +1110,15 @@ export default function PlayerPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Link
-                    href="/ai-coach"
-                    className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-xs font-black uppercase tracking-wider text-black transition hover:bg-amber-300"
+                  <button
+                    type="button"
+                    onClick={runPlayerCoach}
+                    disabled={playerCoachLoading}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-xs font-black uppercase tracking-wider text-black transition hover:bg-amber-300 disabled:cursor-wait disabled:opacity-60"
                   >
                     <Sparkles className="size-4" />
-                    AI Coach
-                  </Link>
+                    {playerCoachLoading ? 'Analyzing…' : 'Player Coach'}
+                  </button>
 
                   <Link
                     href="/war-planner"
@@ -1105,6 +1130,26 @@ export default function PlayerPage() {
                 </div>
               </div>
             </section>
+
+            {/* Player Coach result */}
+            {(playerCoachAnswer || playerCoachError) && (
+              <section className="rounded-2xl border border-amber-400/15 bg-[#11151c]/90 p-5 shadow-xl">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-2.5">
+                    <Sparkles className="h-5 w-5 text-amber-300" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">CLASHIQ AI</p>
+                    <h2 className="text-lg font-black">Player Coach</h2>
+                  </div>
+                </div>
+                {playerCoachError ? (
+                  <p className="rounded-xl border border-red-400/15 bg-red-400/[0.04] p-4 text-sm text-red-200">{playerCoachError}</p>
+                ) : (
+                  <pre className="whitespace-pre-wrap rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-6 text-slate-300">{playerCoachAnswer}</pre>
+                )}
+              </section>
+            )}
 
             {/* Footer navigation */}
             <div className="flex flex-wrap items-center gap-3 pb-4">
