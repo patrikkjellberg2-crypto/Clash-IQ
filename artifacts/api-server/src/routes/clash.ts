@@ -710,42 +710,50 @@ router.get(
         ? basicClanResult.data
         : null;
 
+    // The official clan endpoint is already scoped to the exact requested
+    // tag, so do not reject it because a proxy/cache formats the tag slightly
+    // differently. This is the authoritative source for the live dashboard.
     const officialClanRaw =
       officialClanResult.data &&
       !Array.isArray(officialClanResult.data)
         ? officialClanResult.data
         : null;
 
-    // Every source is checked against the searched tag before any fields are
-    // merged. This prevents data from a stale/default clan from leaking into
-    // a searched clan (for example Capital Points from the wrong clan).
-    const clashKingClan = isRequestedClan(
-      clashKingClanRaw,
-      clanTag,
-    )
-      ? clashKingClanRaw
-      : null;
-    const basicClan = isRequestedClan(
-      basicClanRaw,
-      clanTag,
-    )
-      ? basicClanRaw
-      : null;
-    const officialClan = isRequestedClan(
-      officialClanRaw,
-      clanTag,
-    )
-      ? officialClanRaw
-      : null;
+    const officialMembersRaw = listItems(
+      officialMembersResult.data,
+    );
 
+    const clashKingClan =
+      isRequestedClan(clashKingClanRaw, clanTag)
+        ? clashKingClanRaw
+        : null;
+
+    const basicClan =
+      isRequestedClan(basicClanRaw, clanTag)
+        ? basicClanRaw
+        : null;
+
+    // Official /clans/{tag} is exact-tag by construction.
+    const officialClan = officialClanRaw;
+
+    // Do not make the live dashboard depend on ClashKing search. It is an
+    // optional enrichment source and has been returning 404s in Test.
     const clanNameForSearch =
-      (basicClan?.name ??
-        clashKingClan?.name ??
-        officialClan?.name);
+      typeof officialClan?.name === "string"
+        ? officialClan.name
+        : typeof basicClan?.name === "string"
+          ? basicClan.name
+          : typeof clashKingClan?.name === "string"
+            ? clashKingClan.name
+            : "";
 
     let searchedClan: ClashRecord | null = null;
 
-    if (typeof clanNameForSearch === "string" && clanNameForSearch.trim()) {
+    if (
+      !officialClan &&
+      typeof clanNameForSearch === "string" &&
+      clanNameForSearch.trim()
+    ) {
       const searchResult =
         await fetchOptionalClashKingResource(
           `/clan/search?name=${encodeURIComponent(clanNameForSearch.trim())}&limit=25`,
@@ -758,23 +766,6 @@ router.get(
           isRequestedClan(item, clanTag),
         ) ?? null;
     }
-
-    const officialMembersRaw = listItems(
-      officialMembersResult.data,
-    );
-
-    /*
-     * IMPORTANT: all clan switching must use the exact requested tag.
-     *
-     * BHABE DHEMONS worked because its cached/official sources happened to
-     * agree. Other clans exposed a partial `members: 1` value from one source,
-     * which then overwrote the real count. Do not let one weak source win.
-     *
-     * ClashKing documents the Clan model with members, warWins and warLosses,
-     * and its search result is also a full Clan model. We therefore use the
-     * exact-tag sources as a pool and choose the most complete value for each
-     * field instead of treating one source as globally authoritative.
-     */
 
     const clashKingEmbeddedMembers =
       clashKingClan && Array.isArray(clashKingClan.memberList)
@@ -816,14 +807,15 @@ router.get(
       clashKingEmbeddedMembers,
     ].filter((list) => list.length > 0);
 
-    // Prefer the most complete exact-tag roster. This specifically prevents a
-    // one-member partial response from replacing a 40+ member roster.
+    // Prefer the official /members endpoint whenever it returned data.
     const members =
-      rosterCandidates.length > 0
-        ? rosterCandidates.reduce((best, current) =>
-            current.length > best.length ? current : best,
-          )
-        : [];
+      officialMembersRaw.length > 0
+        ? officialMembersRaw
+        : rosterCandidates.length > 0
+          ? rosterCandidates.reduce((best, current) =>
+              current.length > best.length ? current : best,
+            )
+          : [];
 
     const memberCountCandidates = [
       typeof officialClan?.members === "number"
@@ -843,9 +835,6 @@ router.get(
         typeof value === "number" && value > 0,
     );
 
-    // A count of 1 is treated as suspicious when another exact-tag source or
-    // the actual roster contains multiple members. Otherwise retain a valid
-    // single-member clan.
     const nonSuspiciousCounts =
       memberCountCandidates.filter(
         (value) =>
@@ -870,24 +859,23 @@ router.get(
           memberCountCandidates[0] ??
           null;
 
+    // Prefer the official live clan object. Proxy/cache data is only a
+    // fallback when the official API did not return a clan.
     const clan =
-      basicClan || clashKingClan || officialClan
+      officialClan || basicClan || clashKingClan || searchedClan
         ? {
             ...(clashKingClan ?? {}),
             ...(basicClan ?? {}),
             ...(officialClan ?? {}),
+            ...(searchedClan ?? {}),
           }
         : null;
 
     if (clan) {
-      // Preserve the best exact-tag member count rather than allowing a
-      // partial official response to overwrite it.
       if (memberCount !== null) {
         clan.members = memberCount;
       }
 
-      // Official data is preferred for live Capital fields when available,
-      // but it is only accepted after the tag was verified above.
       if (officialClan) {
         if (typeof officialClan.clanCapitalPoints === "number") {
           clan.clanCapitalPoints = officialClan.clanCapitalPoints;
@@ -896,22 +884,17 @@ router.get(
           clan.capitalLeague = officialClan.capitalLeague;
         }
       }
-    }
 
-    // Fill summary statistics from the exact-tag search result when the
-    // richer clan endpoint omitted them. These fields are intentionally
-    // independent: a source may have warWins but omit warLosses, for example.
-    if (clan && searchedClan) {
-      if (typeof searchedClan.warWins === "number") {
-        clan.warWins = searchedClan.warWins;
-      }
-
-      if (typeof searchedClan.warLosses === "number") {
-        clan.warLosses = searchedClan.warLosses;
-      }
-
-      if (typeof searchedClan.warTies === "number") {
-        clan.warTies = searchedClan.warTies;
+      if (searchedClan) {
+        if (typeof searchedClan.warWins === "number") {
+          clan.warWins = searchedClan.warWins;
+        }
+        if (typeof searchedClan.warLosses === "number") {
+          clan.warLosses = searchedClan.warLosses;
+        }
+        if (typeof searchedClan.warTies === "number") {
+          clan.warTies = searchedClan.warTies;
+        }
       }
     }
 
