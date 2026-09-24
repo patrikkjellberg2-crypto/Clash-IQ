@@ -386,43 +386,32 @@ async function persistWarHistory(warlog: any, clanTag: string) {
       });
 
       const members = Array.isArray(ours?.members) ? ours.members : [];
-      for (const member of members) {
-        const memberTag = normalizeTag(String(member?.tag || ""));
-        if (!memberTag) continue;
-        const attacks = Array.isArray(member?.attacks) ? member.attacks : [];
+      if (!members.length) continue;
 
-        for (let i = 0; i < attacks.length; i += 1) {
-          const attack = attacks[i] || {};
-          await db.insert(warPlayerAttacksTable).values({
-            warKey,
-            playerTag: memberTag,
-            playerName: String(member?.name || ""),
-            townHallLevel: number(member?.townhallLevel ?? member?.townHallLevel),
-            attackIndex: i + 1,
-            stars: number(attack?.stars),
-            destruction: Math.round(number(attack?.destructionPercentage)),
-            targetMapPosition: number(attack?.defender?.mapPosition ?? attack?.defenderMapPosition),
-            defenderTag: String(attack?.defender?.tag || ""),
-            defenderName: String(attack?.defender?.name || ""),
-            attackTime: String(attack?.endTime || attack?.startTime || ""),
-          }).onConflictDoUpdate({
-            target: [
-              warPlayerAttacksTable.warKey,
-              warPlayerAttacksTable.playerTag,
-              warPlayerAttacksTable.attackIndex,
-            ],
-            set: {
-              playerName: String(member?.name || ""),
-              townHallLevel: number(member?.townhallLevel ?? member?.townHallLevel),
-              stars: number(attack?.stars),
-              destruction: Math.round(number(attack?.destructionPercentage)),
-              targetMapPosition: number(attack?.defender?.mapPosition ?? attack?.defenderMapPosition),
-              defenderTag: String(attack?.defender?.tag || ""),
-              defenderName: String(attack?.defender?.name || ""),
-              attackTime: String(attack?.endTime || attack?.startTime || ""),
-            },
-          });
-        }
+      const attackRows = members.flatMap((member: Dict) => {
+        const memberTag = normalizeTag(String(member?.tag || ""));
+        const attacks = Array.isArray(member?.attacks) ? member.attacks : [];
+        if (!memberTag) return [];
+
+        return attacks.map((attack: Dict, i: number) => ({
+          warKey,
+          playerTag: memberTag,
+          playerName: String(member?.name || ""),
+          townHallLevel: number(member?.townhallLevel ?? member?.townHallLevel),
+          attackIndex: i + 1,
+          stars: number(attack?.stars),
+          destruction: Math.round(number(attack?.destructionPercentage)),
+          targetMapPosition: number(attack?.defender?.mapPosition ?? attack?.defenderMapPosition),
+          defenderTag: String(attack?.defender?.tag || ""),
+          defenderName: String(attack?.defender?.name || ""),
+          attackTime: String(attack?.endTime || attack?.startTime || ""),
+        }));
+      });
+
+      if (attackRows.length) {
+        await db.insert(warPlayerAttacksTable)
+          .values(attackRows)
+          .onConflictDoNothing();
       }
     }
   } catch (error) {
