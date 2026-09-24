@@ -747,8 +747,18 @@ router.get(
         ? officialClanResult.data
         : null;
 
-    const officialMembersRaw = listItems(
+    const officialMembersRaw = extractMemberList(
       officialMembersResult.data,
+    );
+
+    req.log.info(
+      {
+        clanTag,
+        officialClanLoaded: Boolean(officialClanResult.data && !Array.isArray(officialClanResult.data)),
+        officialMembersCount: officialMembersRaw.length,
+        officialMembersFailed: officialMembersResult.failed,
+      },
+      "Clash IQ roster fetch",
     );
 
     const clashKingClan =
