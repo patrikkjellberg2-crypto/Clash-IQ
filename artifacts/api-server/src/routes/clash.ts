@@ -403,44 +403,74 @@ router.get(
     const encodedClanTag = encodeURIComponent(clanTag);
 
     try {
+      // The legacy endpoint is still used by some Test frontend views.
+      // Prefer the official Clash of Clans API here so those views keep
+      // working even when the optional ClashKing cache endpoint is unavailable.
+      if (process.env.CLASH_API_TOKEN) {
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(),
+          10_000,
+        );
+
+        try {
+          const officialClan = await fetchClashResource(
+            `/clans/${encodedClanTag}`,
+            controller.signal,
+          );
+
+          if (
+            officialClan &&
+            !Array.isArray(officialClan) &&
+            isRequestedClan(officialClan, clanTag)
+          ) {
+            await persistActiveClanTag(clanTag);
+            res.json(officialClan);
+            return;
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      // Fallback for environments where the official token is not configured.
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(),
         10_000,
       );
 
-      let clan: ClashRecord | ClashRecord[] | null;
       try {
-        clan = await fetchClashKingResource(
+        const clan = await fetchClashKingResource(
           `/clan/${encodedClanTag}/basic`,
           controller.signal,
         );
+
+        if (!clan || Array.isArray(clan)) {
+          res.status(404).json({
+            error: "Clan not found.",
+            code: "CLAN_NOT_FOUND",
+          });
+          return;
+        }
+
+        await persistActiveClanTag(clanTag);
+        res.json(clan);
       } finally {
         clearTimeout(timeout);
       }
-
-      if (!clan || Array.isArray(clan)) {
-        res.status(404).json({
-          error: "Clan not found in ClashKing.",
-          code: "CLAN_NOT_FOUND",
-        });
-        return;
-      }
-
-      await persistActiveClanTag(clanTag);
-      res.json(clan);
     } catch (error) {
       req.log.error(
         {
           err: error,
           clanTag,
         },
-        "Failed to load cached clan from ClashKing",
+        "Failed to load clan",
       );
 
       res.status(503).json({
-        error: "ClashKing is temporarily unavailable.",
-        code: "CLASHKING_UNAVAILABLE",
+        error: "Clash of Clans is temporarily unavailable.",
+        code: "CLAN_UNAVAILABLE",
       });
     }
   },
