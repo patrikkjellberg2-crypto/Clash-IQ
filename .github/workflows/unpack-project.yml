@@ -1,36 +1,66 @@
-# This is a basic workflow to help you get started with Actions
+name: Unpack ZIP files
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+permissions:
+  contents: write
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  unpack:
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Unpack every ZIP in the repo root
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          set -e
+          shopt -s nullglob
+          ZIPS=(*.zip)
+
+          if [ ${#ZIPS[@]} -eq 0 ]; then
+            echo "No ZIP file found in the repo root. Upload a .zip first."
+            exit 1
+          fi
+
+          for ZIP in "${ZIPS[@]}"; do
+            [ -f "$ZIP" ] || continue
+            echo "=== $ZIP ==="
+
+            rm -rf /tmp/new
+            mkdir /tmp/new
+            unzip -q -o "$ZIP" -d /tmp/new
+
+            SRC=/tmp/new
+            if [ "$(ls -A /tmp/new | wc -l)" = "1" ] && [ -d "/tmp/new/$(ls /tmp/new)" ]; then
+              SRC="/tmp/new/$(ls /tmp/new)"
+            fi
+
+            rm -rf "$SRC/.github" "$SRC/.git"
+            rm -f "$ZIP"
+
+            case "$ZIP" in
+              full*|FULL*)
+                echo "FULL mode"
+                find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github -exec rm -rf {} +
+                ;;
+              *)
+                echo "SAFE mode"
+                ;;
+            esac
+
+            cp -a "$SRC"/. .
+          done
+
+          ls -la
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Unpack ZIP files" || echo "Nothing to commit"
+          git push
