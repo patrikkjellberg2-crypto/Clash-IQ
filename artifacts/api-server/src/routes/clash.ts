@@ -15,6 +15,9 @@ const DEFAULT_CLAN_TAG = "#2Q0Q82C9R";
 const CLASH_API_BASE_URL =
   process.env.CLASH_API_BASE_URL ??
   "https://cocproxy.royaleapi.dev/v1";
+const CLASH_API_DIRECT_BASE_URL =
+  process.env.CLASH_API_DIRECT_BASE_URL ??
+  "https://api.clashofclans.com/v1";
 const CLASHKING_API_BASE_URL =
   process.env.CLASHKING_API_BASE_URL ??
   "https://api.clashk.ing";
@@ -266,38 +269,47 @@ async function fetchClashResource(
   signal: AbortSignal,
 ): Promise<ClashRecord | ClashRecord[] | null> {
   const token = process.env.CLASH_API_TOKEN;
+  if (!token) return null;
 
-  if (!token) {
-    return null;
+  const bases = Array.from(new Set([CLASH_API_BASE_URL, CLASH_API_DIRECT_BASE_URL]));
+  let lastError: unknown = null;
+
+  for (const base of bases) {
+    try {
+      const response = await fetch(base + path, {
+        headers: { Accept: "application/json", Authorization: "Bearer " + token },
+        signal,
+      });
+
+      if (!response.ok) {
+        const error = new Error("Clash API returned " + response.status);
+        Object.assign(error, { status: response.status, path, base });
+        lastError = error;
+        continue;
+      }
+
+      const data = (await response.json()) as ClashRecord | ClashRecord[];
+      const looksLikeList = Array.isArray(data) || Boolean(
+        data && typeof data === "object" &&
+        (Array.isArray((data as ClashRecord).items) || Array.isArray((data as ClashRecord).members)),
+      );
+      const looksLikeClan = Boolean(
+        data && typeof data === "object" && typeof (data as ClashRecord).tag === "string",
+      );
+
+      if (path.includes("/members") || path.includes("/warlog") || path.includes("/capitalraidseasons")) {
+        if (!looksLikeList) continue;
+      } else if (path.includes("/clans/") && !path.includes("/currentwar")) {
+        if (!looksLikeClan) continue;
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  const response = await fetch(
-    `${CLASH_API_BASE_URL}${path}`,
-    {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      signal,
-    },
-  );
-
-  if (!response.ok) {
-    const error = new Error(
-      `Clash API returned ${response.status}`,
-    );
-
-    Object.assign(error, {
-      status: response.status,
-      path,
-    });
-
-    throw error;
-  }
-
-  return (await response.json()) as
-    | ClashRecord
-    | ClashRecord[];
+  throw lastError instanceof Error ? lastError : new Error("Clash API unavailable");
 }
 
 async function fetchClashKingResource(
