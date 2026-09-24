@@ -7,7 +7,7 @@
     "build": "pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "start": "pnpm --filter @workspace/db push && pnpm --filter @workspace/api-server start"
+    "start": "if [ -n \"$DATABASE_URL\" ]; then pnpm --filter @workspace/db push; fi; pnpm --filter @workspace/api-server start"
   },
   "private": true,
   "dependencies": {
