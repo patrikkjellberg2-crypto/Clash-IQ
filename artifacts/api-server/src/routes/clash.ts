@@ -8,6 +8,19 @@ import {
   UpsertWarPlannerAssignmentParams,
   UpsertWarPlannerAssignmentResponse,
 } from "@workspace/api-zod";
+import { asc, eq } from "drizzle-orm";
+import {
+  clanSelectionTable,
+  db,
+  warPlannerAssignmentsTable,
+} from "@workspace/db";
+import {
+  getArchivedWar,
+  listArchivedWars,
+  listPlayerWarStats,
+  snapshotCurrentWar,
+  snapshotWarlog,
+} from "../lib/war-archive";
 
 const router: IRouter = Router();
 
@@ -20,19 +33,6 @@ const CLASHKING_API_BASE_URL =
   "https://api.clashk.ing";
 
 const CLAN_SELECTION_ID = 1;
-
-// Test/standalone fallback: when no DATABASE_URL is configured, keep the
-// small amount of mutable planner state in memory. Production/2.0 continues
-// to use Postgres whenever DATABASE_URL is present.
-const memoryPlannerAssignments = new Map<string, Map<string, {
-  warKey: string;
-  attackerTag: string;
-  assignedTargetMapPosition: number | null;
-  locked: boolean;
-  completed: boolean;
-  updatedAt: Date;
-}>>();
-let memoryActiveClanTag = DEFAULT_CLAN_TAG;
 
 type ClashRecord = Record<string, unknown>;
 
@@ -218,19 +218,31 @@ async function getActiveClanTag(
     return normalizeClanTag(requestedTag);
   }
 
-  if (!process.env.DATABASE_URL) {
-    return memoryActiveClanTag;
-  }
+  const [selection] = await db
+    .select({ clanTag: clanSelectionTable.clanTag })
+    .from(clanSelectionTable)
+    .where(eq(clanSelectionTable.id, CLAN_SELECTION_ID))
+    .limit(1);
 
-  // Database-backed selection is intentionally disabled in the standalone
-  // test build; the production service keeps its existing database path.
-  return memoryActiveClanTag;
+  return selection?.clanTag ?? DEFAULT_CLAN_TAG;
 }
 
 async function persistActiveClanTag(
   clanTag: string,
 ): Promise<void> {
-  memoryActiveClanTag = clanTag;
+  await db
+    .insert(clanSelectionTable)
+    .values({
+      id: CLAN_SELECTION_ID,
+      clanTag,
+    })
+    .onConflictDoUpdate({
+      target: clanSelectionTable.id,
+      set: {
+        clanTag,
+        updatedAt: new Date(),
+      },
+    });
 }
 
 async function fetchClashResource(
@@ -909,8 +921,53 @@ router.get(
         dashboard,
       ),
     );
+
+    // Save this war (and the war log) to the database, without slowing
+    // down or breaking the response that was just sent.
+    void snapshotCurrentWar(clanTag, dashboard.currentWar, req.log);
+    void snapshotWarlog(clanTag, warlog, req.log);
   },
 );
+
+/* -------------------------------------------------------------------------- */
+/* War archive (server-side history)                                         */
+/* -------------------------------------------------------------------------- */
+
+router.get("/clash/war-archive", async (req, res): Promise<void> => {
+  try {
+    const clanTag = await getActiveClanTag(
+      typeof req.query.clanTag === "string" ? req.query.clanTag : undefined,
+    );
+    const limit = Number(req.query.limit);
+
+    const [wars, players] = await Promise.all([
+      listArchivedWars(clanTag, Number.isFinite(limit) ? limit : 60),
+      listPlayerWarStats(clanTag),
+    ]);
+
+    res.json({ clanTag, wars, players });
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to load war archive");
+    res.status(503).json({ error: "Could not load the war archive.", code: "WAR_ARCHIVE_FAILED" });
+  }
+});
+
+router.get("/clash/war-archive/:id", async (req, res): Promise<void> => {
+  try {
+    const clanTag = await getActiveClanTag(
+      typeof req.query.clanTag === "string" ? req.query.clanTag : undefined,
+    );
+    const war = await getArchivedWar(clanTag, req.params.id);
+    if (!war) {
+      res.status(404).json({ error: "War not found.", code: "WAR_NOT_FOUND" });
+      return;
+    }
+    res.json(war);
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to load archived war");
+    res.status(503).json({ error: "Could not load this war.", code: "WAR_ARCHIVE_FAILED" });
+  }
+});
 
 /* -------------------------------------------------------------------------- */
 /* Player                                                                     */
@@ -1156,10 +1213,21 @@ router.get(
     const { warKey } =
       parsedQuery.data;
 
-    const assignments = process.env.DATABASE_URL
-      ? []
-      : Array.from(memoryPlannerAssignments.get(warKey)?.values() ?? [])
-          .sort((a, b) => a.attackerTag.localeCompare(b.attackerTag));
+    const assignments =
+      await db
+        .select()
+        .from(warPlannerAssignmentsTable)
+        .where(
+          eq(
+            warPlannerAssignmentsTable.warKey,
+            warKey,
+          ),
+        )
+        .orderBy(
+          asc(
+            warPlannerAssignmentsTable.attackerTag,
+          ),
+        );
 
     res.json(
       GetWarPlannerResponse.parse({
@@ -1217,18 +1285,31 @@ async function saveWarPlannerAssignment(
   } = parsedBody.data;
 
   try {
-    const updatedAt = new Date();
-    const byAttacker = memoryPlannerAssignments.get(warKey) ?? new Map();
-    const assignment = {
-      warKey,
-      attackerTag,
-      assignedTargetMapPosition: assignedTargetMapPosition ?? null,
-      locked,
-      completed,
-      updatedAt,
-    };
-    byAttacker.set(attackerTag, assignment);
-    memoryPlannerAssignments.set(warKey, byAttacker);
+    const [assignment] =
+      await db
+        .insert(
+          warPlannerAssignmentsTable,
+        )
+        .values({
+          warKey,
+          attackerTag,
+          assignedTargetMapPosition,
+          locked,
+          completed,
+        })
+        .onConflictDoUpdate({
+          target: [
+            warPlannerAssignmentsTable.warKey,
+            warPlannerAssignmentsTable.attackerTag,
+          ],
+          set: {
+            assignedTargetMapPosition,
+            locked,
+            completed,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
 
     if (!assignment) {
       res.status(500).json({

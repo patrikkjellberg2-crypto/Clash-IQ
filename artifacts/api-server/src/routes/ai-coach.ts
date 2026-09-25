@@ -310,8 +310,11 @@ async function handleCoach(req: Request, res: Response, requireAuth = false) {
       ? req.body.clanTag
       : DEFAULT_CLAN_TAG;
     const tag = normalizeTag(requestedTag);
+    if (!/^#[0-9A-Z]{3,15}$/.test(tag)) {
+      return res.status(400).json({ error: "Enter a valid Clash clan tag." });
+    }
     const mode = req.body?.mode === "opponent" ? "opponent" : "clan";
-    const question = typeof req.body?.question === "string" ? req.body.question : "";
+    const question = typeof req.body?.question === "string" ? req.body.question.slice(0, 1000) : "";
 
     const data = await getClanData(tag);
     const prompt = buildPrompt(data, mode, question);
@@ -331,105 +334,6 @@ async function handleCoach(req: Request, res: Response, requireAuth = false) {
     return res.status(500).json({ error: message });
   }
 }
-
-async function getPlayerCoachData(playerTag: string) {
-  const tag = normalizeTag(playerTag);
-  const encoded = encodeURIComponent(tag);
-
-  const [player, warlog] = await Promise.all([
-    clashFetch(`/players/${encoded}`),
-    clashFetch(`/clans/${encodeURIComponent(DEFAULT_CLAN_TAG)}/warlog`, []),
-  ]);
-
-  const wars = Array.isArray(warlog) ? warlog : Array.isArray(warlog?.items) ? warlog.items : [];
-  const history: Dict[] = [];
-
-  for (const war of wars.slice(0, 20)) {
-    const sides = [war?.clan, war?.opponent].filter(Boolean);
-    const side = sides.find((s: Dict) =>
-      Array.isArray(s?.members) &&
-      s.members.some((m: Dict) => normalizeTag(String(m?.tag || "")) === tag)
-    );
-    if (!side) continue;
-    const member = side.members.find((m: Dict) => normalizeTag(String(m?.tag || "")) === tag);
-    if (!member) continue;
-
-    const attacks = Array.isArray(member.attacks) ? member.attacks : [];
-    history.push({
-      endTime: war?.endTime || war?.startTime || null,
-      opponentName: (sides.find((s: Dict) => s !== side)?.name) || "Opponent",
-      attacks: attacks.map((a: Dict) => ({
-        stars: number(a?.stars),
-        destruction: number(a?.destructionPercentage),
-        targetMapPosition: number(a?.defender?.mapPosition ?? a?.defenderMapPosition),
-      })),
-    });
-  }
-
-  return { player, tag, history };
-}
-
-function buildPlayerCoachPrompt(data: Dict) {
-  const p = data.player || {};
-  const attacks = data.history.flatMap((w: Dict) => Array.isArray(w.attacks) ? w.attacks : []);
-  const stars = attacks.reduce((sum: number, a: Dict) => sum + number(a.stars), 0);
-  const destruction = attacks.length
-    ? attacks.reduce((sum: number, a: Dict) => sum + number(a.destruction), 0) / attacks.length
-    : 0;
-  const threeStars = attacks.filter((a: Dict) => number(a.stars) >= 3).length;
-
-  const recent = data.history.slice(0, 10).map((w: Dict, i: number) =>
-    String(i + 1) + ". " + String(w.opponentName) + " | " + String(w.endTime || "unknown date") + " | " +
-    ((w.attacks || []).map((a: Dict) =>
-      number(a.stars) + "★ " + number(a.destruction) + "% target #" + number(a.targetMapPosition)
-    ).join(" | ") || "no attacks")
-  ).join("\n");
-
-  return "You are CLASHIQ PLAYER COACH, analyzing one Clash of Clans player.\n\n" +
-    "Use ONLY the verified API data below. Never invent army compositions, skill, motives, defenses, strategies, or missing statistics. If a fact is unavailable, say \"Not available from the current API data.\"\n\n" +
-    "PLAYER\n" +
-    "Name=" + String(p.name || "Unknown") + "\n" +
-    "Tag=" + data.tag + "\n" +
-    "Town Hall=" + number(p.townHallLevel ?? p.townhallLevel) + "\n" +
-    "XP=" + number(p.expLevel) + "\n" +
-    "Trophies=" + number(p.trophies) + "\n" +
-    "League=" + String(p.league?.name || "unknown") + "\n" +
-    "Clan rank=" + number(p.clanRank) + "\n" +
-    "Donations=" + number(p.donations) + "\n" +
-    "Donations received=" + number(p.donationsReceived) + "\n" +
-    "War stars=" + number(p.warStars) + "\n\n" +
-    "WAR PERFORMANCE FROM VERIFIED HISTORY\n" +
-    "Wars with recorded participation=" + data.history.length + "\n" +
-    "Recorded attacks=" + attacks.length + "\n" +
-    "Total stars=" + stars + "\n" +
-    "Average destruction=" + Math.round(destruction) + "%\n" +
-    "3-star attacks=" + threeStars + "\n\n" +
-    "RECENT WAR ATTACKS\n" + (recent || "No verified historical attacks available.") + "\n\n" +
-    "OUTPUT\nUse plain text only.\n" +
-    "1. PLAYER SUMMARY\n2. WAR PERFORMANCE\n3. STRENGTHS\n4. IMPROVEMENT AREAS\n5. ATTACK CONSISTENCY\n6. ACTIVITY\n7. NEXT 3 ACTIONS\n\n" +
-    "Keep every conclusion tied to the supplied data. Do not give a score or overall rating.";
-}
-
-async function handlePlayerCoach(req: Request, res: Response) {
-  try {
-    const requestedTag = typeof req.body?.playerTag === "string" ? req.body.playerTag : "";
-    if (!requestedTag.trim()) return res.status(400).json({ error: "A player tag is required." });
-
-    const data = await getPlayerCoachData(requestedTag);
-    const prompt = buildPlayerCoachPrompt(data);
-    if (prompt.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: "Player data exceeded the analysis limit." });
-
-    const answer = await callGemini(prompt);
-    return res.json({ answer, playerTag: data.tag });
-  } catch (error: any) {
-    console.error("Player Coach error:", error);
-    const message = error?.message || "Player Coach failed";
-    if (isBusyError(error)) return res.status(503).json({ error: "The AI is overloaded right now. Please wait a moment and press Analyze again." });
-    return res.status(500).json({ error: message });
-  }
-}
-
-router.post("/ai/player", (req, res) => handlePlayerCoach(req, res));
 
 router.post("/ai/coach", (req, res) => handleCoach(req, res, false));
 router.post("/ai/chatgpt/coach", (req, res) => handleCoach(req, res, true));
