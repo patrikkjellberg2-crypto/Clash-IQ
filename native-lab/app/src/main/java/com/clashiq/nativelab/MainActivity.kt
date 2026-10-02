@@ -12,9 +12,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -63,10 +63,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -85,7 +82,6 @@ import kotlinx.coroutines.launch
 private val Ink = Color(0xFF050608)
 private val Panel = Color(0xFF10141B)
 private val Gold = Color(0xFFFFC43D)
-private val GoldSoft = Color(0xFFFFE7A3)
 private val Muted = Color(0xFFB1B6C1)
 private val Border = Color(0xFF2B313B)
 
@@ -126,44 +122,73 @@ private fun WelcomeScreen(onSignedIn: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
-    var showIntroContent by remember { mutableStateOf(false) }
+
+    var showLogo by remember { mutableStateOf(false) }
+    var showIcon by remember { mutableStateOf(false) }
+    var showCta by remember { mutableStateOf(false) }
     var isSigningIn by remember { mutableStateOf(false) }
     var loginMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(350)
-        showIntroContent = true
+        kotlinx.coroutines.delay(180)
+        showLogo = true
+        kotlinx.coroutines.delay(520)
+        showIcon = true
+        kotlinx.coroutines.delay(560)
+        showCta = true
     }
 
-    val introScale by animateFloatAsState(
-        targetValue = if (showIntroContent) 1f else 0.86f,
-        animationSpec = tween(1100, easing = FastOutSlowInEasing),
-        label = "introScale"
+    val motion = rememberInfiniteTransition(label = "welcomeMotion")
+    val backgroundScale by motion.animateFloat(
+        initialValue = 1.03f,
+        targetValue = 1.10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(7000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "backgroundScale"
     )
-    val introAlpha by animateFloatAsState(
-        targetValue = if (showIntroContent) 1f else 0f,
-        animationSpec = tween(900),
-        label = "introAlpha"
-    )
-
-    val infinite = rememberInfiniteTransition(label = "heroMotion")
-    val bgScale by infinite.animateFloat(
-        initialValue = 1.02f,
-        targetValue = 1.08f,
+    val backgroundX by motion.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
         animationSpec = infiniteRepeatable(
             animation = tween(9000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "bgScale"
+        label = "backgroundX"
     )
-    val glowPulse by infinite.animateFloat(
-        initialValue = 0.42f,
-        targetValue = 0.72f,
+    val backgroundY by motion.animateFloat(
+        initialValue = -8f,
+        targetValue = 8f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2200),
+            animation = tween(7800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "glowPulse"
+        label = "backgroundY"
+    )
+    val logoGlow by motion.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "logoGlow"
+    )
+    val iconFloat by motion.animateFloat(
+        initialValue = -4f,
+        targetValue = 4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "iconFloat"
+    )
+
+    val iconEntrance by animateFloatAsState(
+        targetValue = if (showIcon) 1f else 0.72f,
+        animationSpec = tween(800, easing = FastOutSlowInEasing),
+        label = "iconEntrance"
     )
 
     Box(
@@ -172,208 +197,251 @@ private fun WelcomeScreen(onSignedIn: () -> Unit) {
             .background(Ink)
     ) {
         Image(
-            painter = painterResource(id = R.drawable.clash_iq_barbarian),
+            painter = painterResource(id = R.drawable.clash_iq_welcome_background),
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    scaleX = bgScale
-                    scaleY = bgScale
+                    scaleX = backgroundScale
+                    scaleY = backgroundScale
+                    translationX = backgroundX
+                    translationY = backgroundY
                 },
             contentScale = ContentScale.Crop
         )
 
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(
-                            Color.Black.copy(alpha = 0.18f),
-                            Color.Black.copy(alpha = 0.48f),
-                            Ink.copy(alpha = 0.98f)
+                        colorStops = arrayOf(
+                            0.0f to Color.Black.copy(alpha = 0.18f),
+                            0.38f to Color.Black.copy(alpha = 0.28f),
+                            0.68f to Color.Black.copy(alpha = 0.58f),
+                            1.0f to Ink.copy(alpha = 0.98f)
                         )
                     )
                 )
         )
 
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(glowPulse)
-        ) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Gold.copy(alpha = 0.32f), Color.Transparent)
-                ),
-                radius = size.minDimension * 0.46f,
-                center = Offset(size.width / 2f, size.height * 0.30f)
-            )
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 28.dp)
+                .padding(horizontal = 24.dp)
                 .padding(
                     top = 34.dp,
-                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 26.dp
-                )
-                .alpha(introAlpha)
-                .scale(introScale),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                    bottom = WindowInsets.navigationBars.asPaddingValues()
+                        .calculateBottomPadding() + 20.dp
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "NATIVE TEST LAB",
-                    color = Gold,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 3.sp
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "COMMAND CENTER",
-                    color = Color.White.copy(alpha = 0.82f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 2.sp
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(170.dp)
-                        .shadow(28.dp, RoundedCornerShape(42.dp))
-                        .background(
-                            brush = Brush.radialGradient(
-                                listOf(
-                                    Color.White.copy(alpha = 0.13f),
-                                    Gold.copy(alpha = 0.08f),
-                                    Color.Transparent
-                                )
-                            ),
-                            shape = RoundedCornerShape(42.dp)
+            AnimatedVisibility(
+                visible = showLogo,
+                enter =
+                    fadeIn(tween(650)) +
+                        slideInVertically(
+                            animationSpec = tween(900, easing = FastOutSlowInEasing),
+                            initialOffsetY = { -70 }
+                        ) +
+                        scaleIn(
+                            animationSpec = tween(900, easing = FastOutSlowInEasing),
+                            initialScale = 0.86f
                         )
-                        .padding(14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.clash_iq_icon),
-                        contentDescription = "Clash IQ",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                }
-
+            ) {
                 Image(
-                    painter = painterResource(id = R.drawable.clash_iq_logo),
+                    painter = painterResource(id = R.drawable.clash_iq_logo_premium),
                     contentDescription = "Clash IQ",
                     modifier = Modifier
-                        .fillMaxWidth(0.70f)
-                        .height(46.dp),
+                        .fillMaxWidth()
+                        .padding(top = 18.dp)
+                        .height(122.dp)
+                        .alpha(logoGlow),
                     contentScale = ContentScale.Fit
-                )
-
-                Text(
-                    text = "Your clan. Your strategy. One view.",
-                    color = Color.White.copy(alpha = 0.88f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
                 )
             }
 
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            Spacer(Modifier.weight(1f))
+
+            AnimatedVisibility(
+                visible = showIcon,
+                enter =
+                    fadeIn(tween(650)) +
+                        slideInVertically(
+                            animationSpec = tween(900, easing = FastOutSlowInEasing),
+                            initialOffsetY = { 120 }
+                        ) +
+                        scaleIn(
+                            animationSpec = tween(1000, easing = FastOutSlowInEasing),
+                            initialScale = 0.55f
+                        )
             ) {
-                AnimatedVisibility(
-                    visible = showIntroContent,
-                    enter = fadeIn(tween(800)) + scaleIn(tween(800), initialScale = 0.96f)
+                Image(
+                    painter = painterResource(id = R.drawable.clash_iq_app_icon),
+                    contentDescription = "Clash IQ app icon",
+                    modifier = Modifier
+                        .size(154.dp)
+                        .graphicsLayer {
+                            translationY = iconFloat
+                            scaleX = iconEntrance
+                            scaleY = iconEntrance
+                        },
+                    contentScale = ContentScale.Fit
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            AnimatedVisibility(
+                visible = showIcon,
+                enter =
+                    fadeIn(tween(700)) +
+                        slideInVertically(
+                            animationSpec = tween(800, easing = FastOutSlowInEasing),
+                            initialOffsetY = { 60 }
+                        )
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            loginMessage = null
-                            if (GOOGLE_WEB_CLIENT_ID.isBlank()) {
-                                loginMessage = "Google-knappen är ansluten. Web Client ID behöver läggas in för riktig inloggning."
-                                return@Button
-                            }
+                    Text(
+                        text = "WAR SMARTER",
+                        color = Gold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.2.sp
+                    )
+                    Text(
+                        text = "PLAY BETTER",
+                        color = Color.White.copy(alpha = 0.90f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 3.sp
+                    )
+                }
+            }
 
-                            scope.launch {
-                                isSigningIn = true
-                                try {
-                                    val googleOption = GetGoogleIdOption.Builder()
-                                        .setServerClientId(GOOGLE_WEB_CLIENT_ID)
-                                        .setFilterByAuthorizedAccounts(false)
-                                        .setAutoSelectEnabled(false)
-                                        .build()
+            Spacer(Modifier.weight(1f))
 
-                                    val request = GetCredentialRequest.Builder()
-                                        .addCredentialOption(googleOption)
-                                        .build()
+            AnimatedVisibility(
+                visible = showCta,
+                enter =
+                    fadeIn(tween(700)) +
+                        slideInVertically(
+                            animationSpec = tween(900, easing = FastOutSlowInEasing),
+                            initialOffsetY = { 120 }
+                        ) +
+                        scaleIn(
+                            animationSpec = tween(850, easing = FastOutSlowInEasing),
+                            initialScale = 0.96f
+                        )
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(26.dp),
+                    border = BorderStroke(1.dp, Gold.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                loginMessage = null
 
-                                    val result = credentialManager.getCredential(
-                                        context = context,
-                                        request = request
-                                    )
-                                    val credential = result.credential
+                                if (GOOGLE_WEB_CLIENT_ID.isBlank()) {
+                                    loginMessage = "Google-inloggningen behöver konfigureras innan den kan användas."
+                                    return@Button
+                                }
 
-                                    if (
-                                        credential is CustomCredential &&
-                                        credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                                    ) {
-                                        GoogleIdTokenCredential.createFrom(credential.data)
-                                        onSignedIn()
-                                    } else if (credential.type == GOOGLE_TOKEN_TYPE) {
-                                        onSignedIn()
-                                    } else {
-                                        loginMessage = "Google-inloggningen kunde inte verifieras."
+                                scope.launch {
+                                    isSigningIn = true
+                                    try {
+                                        val googleOption = GetGoogleIdOption.Builder()
+                                            .setServerClientId(GOOGLE_WEB_CLIENT_ID)
+                                            .setFilterByAuthorizedAccounts(false)
+                                            .setAutoSelectEnabled(false)
+                                            .build()
+
+                                        val request = GetCredentialRequest.Builder()
+                                            .addCredentialOption(googleOption)
+                                            .build()
+
+                                        val result = credentialManager.getCredential(
+                                            context = context,
+                                            request = request
+                                        )
+                                        val credential = result.credential
+
+                                        if (
+                                            credential is CustomCredential &&
+                                            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                                        ) {
+                                            GoogleIdTokenCredential.createFrom(credential.data)
+                                            onSignedIn()
+                                        } else if (credential.type == GOOGLE_TOKEN_TYPE) {
+                                            onSignedIn()
+                                        } else {
+                                            loginMessage = "Google-inloggningen kunde inte verifieras."
+                                        }
+                                    } catch (error: Exception) {
+                                        loginMessage = error.message ?: "Google-inloggningen avbröts."
+                                    } finally {
+                                        isSigningIn = false
                                     }
-                                } catch (error: Exception) {
-                                    loginMessage = error.message ?: "Google-inloggningen avbröts."
-                                } finally {
-                                    isSigningIn = false
+                                }
+                            },
+                            enabled = !isSigningIn,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(58.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color(0xFF161616)
+                            )
+                        ) {
+                            if (isSigningIn) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = Color(0xFF161616),
+                                    strokeWidth = 2.5.dp
+                                )
+                            } else {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "G",
+                                        color = Color(0xFF4285F4),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = "Fortsätt med Google",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
-                        },
-                        enabled = !isSigningIn,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(58.dp),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White,
-                            contentColor = Color(0xFF161616)
-                        )
-                    ) {
-                        if (isSigningIn) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = Color(0xFF161616),
-                                strokeWidth = 2.5.dp
-                            )
-                        } else {
-                            Text(
-                                text = "Fortsätt med Google",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
                         }
+
+                        Text(
+                            text = loginMessage ?: "Säker inloggning med Google",
+                            color = loginMessage?.let {
+                                Color(0xFFFFD1D1)
+                            } ?: Color.White.copy(alpha = 0.65f),
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp
+                        )
                     }
                 }
-
-                Text(
-                    text = loginMessage ?: "Säker inloggning • Native Android",
-                    color = loginMessage?.let { Color(0xFFFFD1D1) } ?: Color.White.copy(alpha = 0.65f),
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                )
             }
         }
     }
@@ -467,7 +535,7 @@ private fun DashboardScreen() {
                 Surface(
                     color = Panel,
                     shape = RoundedCornerShape(20.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                    border = BorderStroke(1.dp, Border),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -512,7 +580,9 @@ private fun DashboardScreen() {
                                 )
                             }
                         }
+
                         androidx.compose.material3.HorizontalDivider(color = Border)
+
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -542,10 +612,11 @@ private fun DashboardScreen() {
                         letterSpacing = 1.sp
                     )
                 }
+
                 Surface(
                     color = Panel,
                     shape = RoundedCornerShape(18.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                    border = BorderStroke(1.dp, Border),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -565,6 +636,7 @@ private fun DashboardScreen() {
                                     .size(24.dp)
                             )
                         }
+
                         Column(
                             Modifier
                                 .weight(1f)
@@ -582,6 +654,7 @@ private fun DashboardScreen() {
                                 fontSize = 12.sp
                             )
                         }
+
                         Icon(
                             Icons.Default.ChevronRight,
                             contentDescription = null,
@@ -598,12 +671,14 @@ private fun DashboardScreen() {
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
+
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     QuickCard(
                         "War Planner",
                         Icons.Default.CalendarMonth,
                         Modifier.weight(1f)
                     ) { selected = "Planner" }
+
                     QuickCard(
                         "AI Coach",
                         Icons.Default.AutoAwesome,
@@ -647,7 +722,7 @@ private fun QuickCard(
         onClick = onClick,
         color = Panel,
         shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+        border = BorderStroke(1.dp, Border),
         modifier = modifier
     ) {
         Column(

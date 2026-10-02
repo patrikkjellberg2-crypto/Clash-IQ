@@ -3,10 +3,13 @@
 
     <application
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:label="Clash IQ Native Lab"
+        android:label="Clash IQ"
         android:usesCleartextTraffic="true"
         android:allowBackup="true"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:icon="@drawable/clash_iq_app_icon"
+        android:roundIcon="@drawable/clash_iq_app_icon">
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
