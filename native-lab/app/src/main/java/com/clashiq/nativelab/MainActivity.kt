@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.tooling.preview.Preview
 
 private val Ink = Color(0xFF101114)
 private val Panel = Color(0xFF1B1D22)
@@ -93,7 +94,7 @@ fun ClashIQNativeApp() {
                     Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(color = Color(0xFF28352C), shape = RoundedCornerShape(12.dp)) {
-                                Icon(Icons.Default.Swords, contentDescription = null, tint = Color(0xFF80C58A), modifier = Modifier.padding(12.dp).size(24.dp))
+                                Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF80C58A), modifier = Modifier.padding(12.dp).size(24.dp))
                             }
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text("No active war", color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -133,4 +134,11 @@ private fun QuickCard(title: String, icon: androidx.compose.ui.graphics.vector.I
             Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }
     }
+}
+
+
+@Preview(showBackground = true, backgroundColor = 0xFF101114)
+@Composable
+fun ClashIQNativePreview() {
+    ClashIQNativeApp()
 }
